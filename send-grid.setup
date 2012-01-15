@@ -2,7 +2,7 @@
 ; email: t@thintz.com
 ; license: bsd
 
-(compile -s -O2 -d1 send-grid.scm -j amazon-s3)
+(compile -s -O2 -d1 send-grid.scm -j send-grid)
 (compile -s send-grid.import.scm -O2 -d0)
 (compile -c -O2 -d1 send-grid.scm -unit send-grid -j send-grid)
 
