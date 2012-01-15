@@ -9,7 +9,5 @@
 
 (needs http-client uri-common intarweb json srfi-1 srfi-18)
 
-(test-depends test srfi-1)
-
 (author "Thomas Hintz")
 (synopsis "Provides a simple interface to the SendGrid mailer service."))
