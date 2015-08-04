@@ -35,7 +35,7 @@
    send-mail)
 
 (import scheme chicken)
-(use http-client uri-common intarweb json srfi-1 srfi-18)
+(use data-structures http-client uri-common intarweb json srfi-1 srfi-18)
 
 (define api-user (make-parameter ""))
 (define api-key (make-parameter ""))
@@ -44,7 +44,7 @@
   (vector->list (with-input-from-request
                  (make-request method: method uri: (uri-reference url)) parameters json-read)))
 
-(define (send-mail #!key (subject #f) (text #f) (html #f) (from #f) (from-name #f) (to #f) (reply-to #f) (api-user (api-user)) (api-key (api-key)))
+(define (send-mail #!key (subject #f) (text #f) (html #f) (from #f) (from-name #f) (to #f) (reply-to #f) (api-user (api-user)) (api-key (api-key)) files)
   (if (and subject (or text html) from from-name to reply-to)
       (rest-action "https://sendgrid.com/api/mail.send.json" 'POST
                    `((api_user . ,api-user)
@@ -54,6 +54,16 @@
                      (replyto . ,reply-to)
                      ,(if html `(html . ,html) `(text . ,text))
                      (from . ,from)
-                     (fromname . ,from-name)))
+                     (fromname . ,from-name)
+                     ,@(map
+                        (lambda (file-details)
+                          `(,(string->symbol
+                              (string-append
+                               "files[" (alist-ref 'filename file-details) "]"))
+                            file: ,(alist-ref 'filepath file-details)
+                            filename: ,(alist-ref 'filename file-details)
+                            headers: ((content-type
+                                       ,(alist-ref 'content-type file-details)))))
+                        files)))
       (abort "All parameters are required for successfully sending mail.")))
 )
