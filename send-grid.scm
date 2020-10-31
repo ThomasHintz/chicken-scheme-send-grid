@@ -2,7 +2,7 @@
 ; email: t@thintz.com
 ; license: bsd
 
-; Copyright (c) 2012, Thomas Hintz
+; Copyright (c) 2012, 2020, Thomas Hintz
 ; All rights reserved.
 
 ; Redistribution and use in source and binary forms, with or without
@@ -29,22 +29,26 @@
 
 (module send-grid
   (;; params
-   api-user api-key
+   api-user api-key api-version
 
    ;; procs
    send-mail)
 
-(import scheme chicken)
-(use data-structures http-client uri-common intarweb json srfi-1 srfi-18)
+(import scheme chicken extras ports)
+(use data-structures http-client uri-common intarweb json srfi-1 srfi-18 base64)
+
+;; intarweb doesn't support Bearer authorization so we do it ourselves
+(header-unparsers (append (header-unparsers) `((Authorization . ,(lambda (x) (list (conc (vector-ref (car x) 0) " " (vector-ref (car x) 1))))))))
 
 (define api-user (make-parameter ""))
 (define api-key (make-parameter ""))
+(define api-version (make-parameter "2"))
 
-(define (rest-action url method parameters)
-  (vector->list (with-input-from-request
-                 (make-request method: method uri: (uri-reference url)) parameters json-read)))
+(define (rest-action url method parameters #!key (headers (headers '())))
+  (with-input-from-request
+      (make-request method: method uri: (uri-reference url) headers: headers) parameters read-string))
 
-(define (send-mail #!key (subject #f) (text #f) (html #f) (from #f) (from-name #f) (to #f) (reply-to #f) (api-user (api-user)) (api-key (api-key)) files)
+(define (send-mail-2 #!key (subject #f) (text #f) (html #f) (from #f) (from-name #f) (to #f) (reply-to #f) (api-user (api-user)) (api-key (api-key)) files)
   (if (and subject (or text html) from from-name to reply-to)
       (rest-action "https://sendgrid.com/api/mail.send.json" 'POST
                    `((api_user . ,api-user)
@@ -66,4 +70,50 @@
                                        ,(alist-ref 'content-type file-details)))))
                         files)))
       (abort "All parameters are required for successfully sending mail.")))
+
+(define (send-mail-3 #!key (subject #f) (text #f) (html #f) (from #f) (from-name #f) (to #f) (reply-to #f) (api-user (api-user)) (api-key (api-key)) files)
+  (if (and subject (or text html) from from-name to reply-to)
+      (let ((res (with-input-from-request
+                     (make-request method: 'POST uri: (uri-reference "https://api.sendgrid.com/v3/mail/send")
+                                   headers: (headers `((content-type #(application/json ()))
+                                                       (Authorization #(Bearer ,api-key)))))
+                   (lambda ()
+                     (json-write
+                      `#((personalizations . (#((to . (#((email . ,to)
+                                                         (name . ,from-name))))
+                                                (subject . ,subject))))
+                         (from . #((email . ,from)
+                                   (name . ,from-name)))
+                         (reply_to . #((email . ,reply-to)))
+                         (content . (,@(if text
+                                           `(#((type . "text/plain")
+                                               (value . ,text)))
+                                           '())
+                                     ,@(if html
+                                           `(#((type . "text/html")
+                                               (value . ,html)))
+                                           '())))
+                         ,@(if files
+                               `((attachments . ,(map
+                                                  (lambda (file-details)
+                                                    `#((type . ,(symbol->string (alist-ref 'content-type file-details)))
+                                                       (content . ,(base64-encode (with-input-from-file (alist-ref 'filepath file-details) read-string)))
+                                                       (filename . ,(alist-ref 'filename file-details))))
+                                                  files)))
+                               '()))))
+                   read-string)))
+        (if (equal? res "")
+            (with-output-to-string (lambda () (json-write #((message . "success"))))) ;; mimic v2 API
+            (with-input-from-string res json-read)))
+      (abort "All parameters are required for successfully sending mail.")))
+
+(define (send-mail #!rest r)
+  (apply (cond ((equal? (api-version) "2")
+                send-mail-2)
+               ((equal? (api-version) "3")
+                send-mail-3)
+               (else
+                (error "Unknown API version")))
+         r))
+
 )
